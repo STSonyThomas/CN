@@ -66,7 +66,7 @@ class Server:
                     template+=rf"/(?P<{subpath[1:-1]}>[a-zA-Z0-9_.\-~%]+)"
                 else:
                     template+=rf"/{subpath}"
-            if self.funcMap[method].get(template):
+            if self.funcMap[method].get(template):# I can check if the path already exists before templating to avoid unnecessary templating
                 raise Exception("Route already exists")
             self.funcMap[method][template]={
                 "middlewares": middleware or [],
@@ -88,10 +88,16 @@ class Server:
         request_lines     = request.splitlines()
         request_line      = request_lines[0] if request_lines else ""
         method,path,*rest = request_line.split() if len(request_line.split())>=2 else ("","")
-        #what does the *_ do here?It unpacks and ignores
-        #Step-1 Check if valid path
-
-        q = httpRegex(path)#check if the path is valid and if so extract query parameters
+        # what does the *_ do here?It unpacks and ignores
+        headers={}
+        # Step-0 Add headers to the Request Object
+        for line in request_lines[1:]:
+            if line.strip()=="":
+                break
+            key,value            =  line.split(":",1)
+            headers[key.strip()] =  value.strip()
+        # Step-1 Check if valid path
+        q = httpRegex(path)# check if the path is valid and if so extract query parameters
 
         matched_template = self._compare(method,path,self.funcMap[method].keys())
         if matched_template:
@@ -104,7 +110,8 @@ class Server:
                 "method":method,
                 "path":path,
                 "params":route.get("params",{}),
-                "queries":route.get("queries",{})
+                "queries":route.get("queries",{}),
+                "headers":headers
             }
             res:Dict ={
                 "status":404,
@@ -203,6 +210,7 @@ if __name__ == "__main__":
         else:
             res["status"] = 401
             res["body"] = "Unauthorized"
+            print(req)
 
     server = Server(port=8000)
     server.add_route(
