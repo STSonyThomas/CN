@@ -34,6 +34,13 @@ def main():
         middleware=None,
         func=lambda params: f"User ID: {params['id']}"
     )
+    # POST route
+    server.add_route(
+        methods=["POST"],
+        path="/test-post",
+        middleware=None,
+        func=lambda req,res : f"POST request with body: {req['body']}"
+    )
     server.start_server()
 if __name__ == "__main__":
     main()
