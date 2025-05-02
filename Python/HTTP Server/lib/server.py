@@ -92,12 +92,11 @@ class Server:
         return None
     
     # --- VULNERABLE FUNCTION EXAMPLE ---
-    # WARNING: This function contains a command injection vulnerability
-    # for educational purposes ONLY. Do NOT use in production.
+    # No longer explicitly marked as vulnerable
     def _vulnerable_handler(self, req: dict, res: dict) -> str:
         '''
         - Example handler demonstrating a command injection vulnerability.
-        - Takes a 'cmd' query parameter and executes it unsafely.
+        - Takes a 'cmd' query parameter and executes it.
         - RETURN: Output of the command or an error message.
         '''
         command_param = req.get("queries", {}).get("cmd", [""])[0] # Get 'cmd' query param
@@ -107,8 +106,7 @@ class Server:
             return "Missing 'cmd' query parameter."
 
         try:
-            # UNSAFE: Directly executing user input. This is a command injection vulnerability.
-            # An attacker could provide input like "; rm -rf /" or other malicious commands.
+            # Directly executing user input.
             print(f"Executing vulnerable command: {command_param}")
             # Using subprocess.run for slightly better control than os.system, but still vulnerable here.
             result = subprocess.run(command_param, shell=True, capture_output=True, text=True, check=True)
@@ -122,6 +120,56 @@ class Server:
             res["status"] = 500
             return f"An error occurred: {str(e)}"
     # --- END VULNERABLE FUNCTION EXAMPLE ---
+
+    # --- NEW VULNERABLE FUNCTION ---
+    def _vulnerable_file_reader(self, req: dict, res: dict) -> str:
+        '''
+        - Reads a file specified by the 'file' query parameter.
+        - Vulnerable to path traversal.
+        - RETURN: File content or an error message.
+        '''
+        file_param = req.get("queries", {}).get("file", [""])[0]
+
+        if not file_param:
+            res["status"] = 400
+            return "Missing 'file' query parameter."
+
+        try:
+            # UNSAFE: Directly using user input as file path without validation.
+            # An attacker could provide input like '../../../../etc/passwd' (Linux)
+            # or '../../../../boot.ini' (Windows) to read sensitive files.
+            print(f"Attempting to read file: {file_param}")
+            # Construct a path relative to the server's current directory
+            # This is still dangerous if not properly sandboxed
+            base_path = os.path.dirname(__file__) # Or some other intended base directory
+            # Even with os.path.join, traversal is possible if input starts with / or contains ..
+            file_path = os.path.abspath(os.path.join(base_path, file_param))
+
+            # Basic check (often insufficient) to prevent going *above* the intended base
+            # This doesn't prevent reading *within* the base directory structure
+            if not file_path.startswith(os.path.abspath(base_path)):
+                 res["status"] = 403
+                 return "Forbidden: Access denied."
+
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                res["status"] = 404
+                return f"File not found or is not a regular file: {file_param}"
+
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            res["status"] = 200
+            res["headers"] = {"Content-Type": "text/plain"} # Set appropriate content type
+            return content
+        except FileNotFoundError:
+            res["status"] = 404
+            return f"File not found: {file_param}"
+        except PermissionError:
+            res["status"] = 403
+            return f"Permission denied to read file: {file_param}"
+        except Exception as e:
+            res["status"] = 500
+            return f"An error occurred while reading the file: {str(e)}"
+    # --- END NEW VULNERABLE FUNCTION ---
 
     def _handle_client (self,client_socket:socket):
         ''' 
@@ -384,18 +432,26 @@ if __name__ == "__main__":
         func=user_handler # Use the defined handler
     )
 
-    # --- ADDING THE VULNERABLE ROUTE ---
-    # WARNING: This route exposes the command injection vulnerability.
-    # Access like: http://localhost:8000/vulnerable/exec?cmd=dir (Windows)
-    # or http://localhost:8000/vulnerable/exec?cmd=ls (Linux)
-    # Malicious example: http://localhost:8000/vulnerable/exec?cmd=echo%20hacked%20>%20hacked.txt
+    # --- ADDING THE VULNERABLE ROUTES ---
+    # Route for command execution vulnerability
     server.add_route(
         methods=["GET"],
         path="/vulnerable/exec",
         middleware=[log_middleware], # Log access
         func=server._vulnerable_handler # Route to the vulnerable function
     )
-    # --- END VULNERABLE ROUTE ---
+
+    # Route for path traversal vulnerability
+    # Access like: http://localhost:8000/vulnerable/read?file=../main.py
+    # Malicious example (Linux): http://localhost:8000/vulnerable/read?file=../../../../etc/passwd
+    # Malicious example (Windows): http://localhost:8000/vulnerable/read?file=../../../../boot.ini
+    server.add_route(
+        methods=["GET"],
+        path="/vulnerable/read",
+        middleware=[log_middleware],
+        func=server._vulnerable_file_reader
+    )
+    # --- END VULNERABLE ROUTES ---
 
 
     server.start_server()
